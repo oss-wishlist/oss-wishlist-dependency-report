@@ -1,8 +1,6 @@
 name: Analyze Dependencies for Wishlists (test)
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
   schedule:
     - cron: '0 9 * * 1'  # Weekly on Monday
