@@ -1,4 +1,4 @@
-name: 'OSS Sustainability Analyzer'
+name: 'OSS Wishlist Analyzer'
 description: 'Analyze your project dependencies using SBOM and ecosyste.ms data to identify sustainability risks'
 branding:
   icon: 'shield'
@@ -15,10 +15,10 @@ inputs:
     required: true
     default: ${{ github.token }}
   
-  criticality-threshold:
-    description: 'Minimum criticality score to flag (0.0-1.0)'
+  dependency-threshold:
+    description: 'Minimum number of dependents to include in report (default: 1000)'
     required: false
-    default: '0.5'
+    default: '1000'
   
   create-issue:
     description: 'Create GitHub issue for high-risk dependencies'
@@ -31,11 +31,11 @@ inputs:
     default: 'true'
 
 outputs:
-  risk-score:
-    description: 'Overall dependency risk score (0-100)'
+  high-dependency-count:
+    description: 'Number of high-usage dependencies identified'
   
-  critical-count:
-    description: 'Number of critical dependencies identified'
+  without-backing-count:
+    description: 'Number of dependencies without Big Tech backing'
   
   report-path:
     description: 'Path to detailed analysis report'

@@ -1,5 +1,5 @@
 {
-  "name": "oss-sustainability-analyzer-action",
+  "name": "oss-wishlist-analyzer-action",
   "version": "1.0.0",
   "description": "GitHub Action to analyze OSS dependencies using SBOM and ecosyste.ms",
   "main": "dist/index.js",
