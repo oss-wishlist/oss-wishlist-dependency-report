@@ -33,4 +33,12 @@ This provides **sustainability-focused risk assessment** that identifies project
 - 📦 **SBOM Analysis** - Works with SPDX and CycloneDX formats
 - 🏢 **Organizational Backing Assessment** - Evaluates maintainer employment/support structure
 
+## Workflow
+The workflow generates an SBOM if there is one one available 
+
+1. anchore/sbom-action reads your package.json and package-lock.json
+2. Generates sbom.json (temporary file in the workflow)
+3. Your oss-analyzer action reads that sbom.json
+3. Analyzes it and generates the risk report
+
 
