@@ -1,6 +1,6 @@
-# oss-sustainability-analyzer
+# README.md
 
-# OSS Sustainability Analyzer
+## OSS Sustainability Analyzer
 
 A GitHub Action that helps identify **which of your dependencies need sustainability support** by analyzing SBOM data and calculating risk scores based on the OpenSSF Criticality Score algorithm additionally weighted by the organizational affiliation of the user's login credentials.  Note: we know that many people use their personal email for work-related open source work, and  this is one way we can look at existing influence and support from an analytics perspective.
 
