@@ -501,7 +501,6 @@ async function run() {
   } catch (error) {
     core.error(`[Action] Failed: ${error.message}`);
     core.setFailed(error.message);
-}
   }
 }
 
