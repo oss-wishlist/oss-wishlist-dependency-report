@@ -190,9 +190,36 @@ class EcosystemsClient {
     if (!data) return null;
 
     const repoMeta = data.repo_metadata || {};
-    
-    // Check for GitHub Sponsors (proxy for oss-wishlist field until available)
-    const has_github_sponsors = repoMeta.has_sponsors || false;
+    // Check for wishlist/funding signals (proxy until ecosyste.ms exposes oss-wishlist)
+    // Sources we consider:
+    // - package-level funding links (data.funding_links)
+    // - owner/org sponsors listing (repoMeta.owner_record.metadata.has_sponsors_listing)
+    // - owner-level funding links (repoMeta.owner_record.funding_links)
+    // - repository FUNDING file presence (repoMeta.metadata.files.funding)
+    // - repository-level funding links (repoMeta.funding_links)
+    const pkgFundingLinks = Array.isArray(data.funding_links) ? data.funding_links : [];
+    const ownerHasSponsors = Boolean(repoMeta.owner_record?.metadata?.has_sponsors_listing);
+    const ownerFundingLinks = Array.isArray(repoMeta.owner_record?.funding_links)
+      ? repoMeta.owner_record.funding_links
+      : [];
+    const repoFundingFile = Boolean(repoMeta.metadata?.files?.funding);
+    const repoFundingLinks = Array.isArray(repoMeta.funding_links) ? repoMeta.funding_links : [];
+    // Some registries might (in future or undocumented) expose maintainer funding_links
+    const maintainerFundingLinks = Array.isArray(data.maintainers)
+      ? data.maintainers.flatMap(m => Array.isArray(m.funding_links) ? m.funding_links : [])
+      : [];
+    // Merge and dedupe funding links
+    const fundingLinks = Array.from(new Set([
+      ...pkgFundingLinks,
+      ...ownerFundingLinks,
+      ...repoFundingLinks,
+      ...maintainerFundingLinks
+    ].filter(Boolean)));
+    const has_github_sponsors = Boolean(
+      fundingLinks.length > 0 ||
+      ownerHasSponsors ||
+      repoFundingFile
+    );
     
     const info = {
       name: data.name,
@@ -202,7 +229,8 @@ class EcosystemsClient {
       last_update_months: data.updated_at ? this.monthsSince(data.updated_at) : 0,
       repository_url: data.repository_url,
       big_tech_backing: this.hasBigTechBacking(data.maintainers, repoMeta.owner),
-      has_wishlist: has_github_sponsors  // TODO: Replace with 'oss-wishlist' field when available
+      has_wishlist: has_github_sponsors,  // TODO: Replace with 'oss-wishlist' field when available
+      funding_links: fundingLinks
     };
 
     return info;
@@ -304,6 +332,11 @@ class DependencyAnalyzer {
 
   async analyzeComponents(components) {
     const results = [];
+    let countWithRepoMeta = 0;
+    let countWithPkgFunding = 0;
+    let countOwnerHasSponsors = 0;
+    let countRepoFundingSignal = 0;
+    let countSkippedNoWishlist = 0;
 
     core.info(`Analyzing ${components.length} components...`);
 
@@ -318,15 +351,19 @@ class DependencyAnalyzer {
       const info = await this.ecosystems.getPackageInfo(component.purl);
       
       if (info) {
+        // Basic diagnostics on presence of metadata/funding signals
+        if (info.repository_url) countWithRepoMeta++;
         // Only include packages with wishlists (currently GitHub Sponsors as proxy)
         // TODO: Update to filter on 'oss-wishlist' field when available in ecosyste.ms
         if (info.has_wishlist) {
+          core.info(`Including ${component.name}: wishlist/funding detected`);
           results.push({
             ...component,
             ...info
           });
         } else {
           core.info(`Skipping ${component.name}: no wishlist/GitHub Sponsors`);
+          countSkippedNoWishlist++;
         }
       } else {
         core.warning(`No data available for ${component.name}, skipping`);
@@ -335,6 +372,10 @@ class DependencyAnalyzer {
 
     // Sort by dependents count (highest first) to show impact
     results.sort((a, b) => b.dependents_count - a.dependents_count);
+
+    // High-level diagnostics to aid troubleshooting when zero results
+    core.info(`[Diagnostics] With repo metadata: ${countWithRepoMeta}`);
+    core.info(`[Diagnostics] Skipped (no wishlist): ${countSkippedNoWishlist}`);
 
     return {
       packages: results,
@@ -379,6 +420,12 @@ class ReportGenerator {
           if (pkg.repository_url) {
             report += `- **Repository**: ${pkg.repository_url}\n`;
           }
+          if (pkg.funding_links && pkg.funding_links.length) {
+            report += `- **Funding**:\n`;
+            for (const link of pkg.funding_links) {
+              report += `  - ${link}\n`;
+            }
+          }
           report += `\n`;
         }
       }
@@ -393,6 +440,12 @@ class ReportGenerator {
           report += `- **Last Update**: ${pkg.last_update_months} months ago\n`;
           if (pkg.repository_url) {
             report += `- **Repository**: ${pkg.repository_url}\n`;
+          }
+          if (pkg.funding_links && pkg.funding_links.length) {
+            report += `- **Funding**:\n`;
+            for (const link of pkg.funding_links) {
+              report += `  - ${link}\n`;
+            }
           }
           report += `\n`;
         }
