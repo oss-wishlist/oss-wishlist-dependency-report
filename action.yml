@@ -1,5 +1,5 @@
 name: 'OSS Wishlist Analyzer'
-description: 'Analyze your project dependencies using SBOM and ecosyste.ms data to identify sustainability risks'
+description: 'Analyze your project dependencies across all ecosystems (npm, PyPI, Cargo, Maven, etc.) using SBOM and ecosyste.ms data to identify sustainability risks'
 branding:
   icon: 'shield'
   color: 'blue'
@@ -16,7 +16,7 @@ inputs:
     default: ${{ github.token }}
   
   dependency-threshold:
-    description: 'Minimum number of dependents to include in report (default: 1000)'
+    description: '[DEPRECATED] This input is no longer used for filtering. All dependencies with wishlists are reported.'
     required: false
     default: '1000'
   
@@ -31,11 +31,11 @@ inputs:
     default: 'true'
 
 outputs:
-  high-dependency-count:
-    description: 'Number of high-usage dependencies identified'
+  with-wishlist-count:
+    description: 'Number of dependencies with wishlists (currently GitHub Sponsors)'
   
   without-backing-count:
-    description: 'Number of dependencies without Big Tech backing'
+    description: 'Number of dependencies with wishlists but without Big Tech backing'
   
   report-path:
     description: 'Path to detailed analysis report'

@@ -28,6 +28,7 @@ This provides **sustainability-focused risk assessment** that identifies project
 
 - 📊 **Enhanced Criticality Score** - OpenSSF algorithm + organizational backing analysis
 - 🔍 **Supply Chain Visibility** - See which dependencies are at risk using SBOM + ecosyste.ms
+- 🌐 **Polyglot Support** - Works with npm, PyPI, Cargo, Maven, RubyGems, Go, NuGet, Hex, Pub, Composer, and more
 - 📈 **Risk Categorization** - High/medium/low risk based on sustainability indicators
 - 💬 **Automated Reporting** - PR comments and issues flag at-risk dependencies
 - 📦 **SBOM Analysis** - Works with SPDX and CycloneDX formats
