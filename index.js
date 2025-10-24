@@ -105,31 +105,28 @@ class EcosystemsClient {
     // Parse PURL format: pkg:type/namespace/name@version
     const purlMatch = purl.match(/^pkg:([^/]+)\/(.+)$/);
     if (!purlMatch) return null;
-    
+
     const type = purlMatch[1];
     const rest = purlMatch[2];
-    
+
     // Get registry name from type
     const registry = this.registryMap[type];
     if (!registry) {
       core.info(`Unsupported package type: ${type}`);
       return null;
     }
-    
-    // Extract package name (strip version if present)
-    let packageName;
-    if (rest.includes('@') && !rest.startsWith('@')) {
-      // Format: name@version
-      packageName = rest.split('@')[0];
-    } else if (rest.startsWith('@')) {
-      // Format: @scope/name@version (npm scoped packages)
-      const match = rest.match(/^(@[^@]+)(?:@.+)?$/);
-      packageName = match ? match[1] : rest;
-    } else {
-      // Format: namespace/name@version or name@version
-      packageName = rest.split('@')[0];
-    }
-    
+
+    // Decode once to correctly handle scoped names like %40scope/name
+    const decoded = (() => {
+      try { return decodeURIComponent(rest); } catch { return rest; }
+    })();
+
+    // Remove trailing @version only if it's after the last '/'
+    const lastSlash = decoded.lastIndexOf('/');
+    const atIndex = decoded.lastIndexOf('@');
+    const namePart = (atIndex > lastSlash) ? decoded.slice(0, atIndex) : decoded;
+
+    const packageName = namePart;
     return { type, registry, packageName };
   }
 
