@@ -350,66 +350,60 @@ class DependencyAnalyzer {
 // Report Generator
 class ReportGenerator {
   static async generateMarkdown(analysis, threshold) {
-    let report = `${CONFIG.REPORT_TITLE}\n\n`;
-    
-    report += `> **Note**: This report shows dependencies with **wishlists** (currently using GitHub Sponsors as a proxy until \`oss-wishlist\` field is available in ecosyste.ms).\n\n`;
-    
-    report += `${CONFIG.REPORT_SUMMARY_TITLE}\n\n`;
-    report += `- **Total Dependencies Scanned**: ${analysis.total_analyzed}\n`;
-    report += `- **Dependencies with Wishlists**: ${analysis.with_wishlist_count}\n`;
-    
-    const withBigTech = analysis.packages.filter(p => p.big_tech_backing).length;
-    const withoutBigTech = analysis.packages.length - withBigTech;
-    
-    report += `- **With Big Tech Backing**: ${withBigTech}\n`;
-    report += `- **Without Big Tech Backing**: ${withoutBigTech}\n\n`;
-
-    if (analysis.packages.length === 0) {
-      report += `No dependencies found with wishlists/GitHub Sponsors.\n\n`;
+      core.info('[ReportGenerator] Starting markdown report generation');
+      let report = `${CONFIG.REPORT_TITLE}\n\n`;
+      report += `> **Note**: This report shows dependencies with **wishlists** (currently using GitHub Sponsors as a proxy until \`oss-wishlist\` field is available in ecosyste.ms).\n\n`;
+      report += `${CONFIG.REPORT_SUMMARY_TITLE}\n\n`;
+      report += `- **Total Dependencies Scanned**: ${analysis.total_analyzed}\n`;
+      report += `- **Dependencies with Wishlists**: ${analysis.with_wishlist_count}\n`;
+      const withBigTech = analysis.packages.filter(p => p.big_tech_backing).length;
+      const withoutBigTech = analysis.packages.length - withBigTech;
+      report += `- **With Big Tech Backing**: ${withBigTech}\n`;
+      report += `- **Without Big Tech Backing**: ${withoutBigTech}\n\n`;
+      if (analysis.packages.length === 0) {
+        core.warning('[ReportGenerator] No dependencies found with wishlists/GitHub Sponsors');
+        report += `No dependencies found with wishlists/GitHub Sponsors.\n\n`;
+        return report;
+      }
+      // Group by Big Tech backing
+      const withBacking = analysis.packages.filter(p => p.big_tech_backing);
+      const withoutBacking = analysis.packages.filter(p => !p.big_tech_backing);
+      core.info(`[ReportGenerator] Packages with backing: ${withBacking.length}, without backing: ${withoutBacking.length}`);
+      if (withoutBacking.length > 0) {
+        report += `${CONFIG.REPORT_WITHOUT_BACKING_TITLE}\n\n`;
+        report += `${CONFIG.REPORT_WITHOUT_BACKING_DESCRIPTION}\n\n`;
+        for (const pkg of withoutBacking) {
+          core.info(`[ReportGenerator] Adding package without backing: ${pkg.name}@${pkg.version}`);
+          report += `### ${pkg.name} (v${pkg.version})\n\n`;
+          report += `- **Dependents**: ${pkg.dependents_count.toLocaleString()} 📦\n`;
+          report += `- **Stars**: ${pkg.stars.toLocaleString()} ⭐\n`;
+          report += `- **Age**: ${pkg.age_months} months\n`;
+          report += `- **Last Update**: ${pkg.last_update_months} months ago\n`;
+          if (pkg.repository_url) {
+            report += `- **Repository**: ${pkg.repository_url}\n`;
+          }
+          report += `\n`;
+        }
+      }
+      if (withBacking.length > 0) {
+        report += `${CONFIG.REPORT_WITH_BACKING_TITLE}\n\n`;
+        for (const pkg of withBacking) {
+          core.info(`[ReportGenerator] Adding package with backing: ${pkg.name}@${pkg.version}`);
+          report += `### ${pkg.name} (v${pkg.version})\n\n`;
+          report += `- **Dependents**: ${pkg.dependents_count.toLocaleString()} 📦\n`;
+          report += `- **Stars**: ${pkg.stars.toLocaleString()} ⭐\n`;
+          report += `- **Age**: ${pkg.age_months} months\n`;
+          report += `- **Last Update**: ${pkg.last_update_months} months ago\n`;
+          if (pkg.repository_url) {
+            report += `- **Repository**: ${pkg.repository_url}\n`;
+          }
+          report += `\n`;
+        }
+      }
+      report += `---\n\n`;
+      report += `${CONFIG.REPORT_FOOTER}\n`;
+      core.info('[ReportGenerator] Markdown report generation complete');
       return report;
-    }
-
-    // Group by Big Tech backing
-    const withBacking = analysis.packages.filter(p => p.big_tech_backing);
-    const withoutBacking = analysis.packages.filter(p => !p.big_tech_backing);
-
-    if (withoutBacking.length > 0) {
-      report += `${CONFIG.REPORT_WITHOUT_BACKING_TITLE}\n\n`;
-      report += `${CONFIG.REPORT_WITHOUT_BACKING_DESCRIPTION}\n\n`;
-      
-      for (const pkg of withoutBacking) {
-        report += `### ${pkg.name} (v${pkg.version})\n\n`;
-        report += `- **Dependents**: ${pkg.dependents_count.toLocaleString()} 📦\n`;
-        report += `- **Stars**: ${pkg.stars.toLocaleString()} ⭐\n`;
-        report += `- **Age**: ${pkg.age_months} months\n`;
-        report += `- **Last Update**: ${pkg.last_update_months} months ago\n`;
-        if (pkg.repository_url) {
-          report += `- **Repository**: ${pkg.repository_url}\n`;
-        }
-        report += `\n`;
-      }
-    }
-
-    if (withBacking.length > 0) {
-      report += `${CONFIG.REPORT_WITH_BACKING_TITLE}\n\n`;
-      
-      for (const pkg of withBacking) {
-        report += `### ${pkg.name} (v${pkg.version})\n\n`;
-        report += `- **Dependents**: ${pkg.dependents_count.toLocaleString()} 📦\n`;
-        report += `- **Stars**: ${pkg.stars.toLocaleString()} ⭐\n`;
-        report += `- **Age**: ${pkg.age_months} months\n`;
-        report += `- **Last Update**: ${pkg.last_update_months} months ago\n`;
-        if (pkg.repository_url) {
-          report += `- **Repository**: ${pkg.repository_url}\n`;
-        }
-        report += `\n`;
-      }
-    }
-
-    report += `---\n\n`;
-    report += `${CONFIG.REPORT_FOOTER}\n`;
-
-    return report;
   }
 
   static async saveReport(report, outputPath) {
@@ -421,56 +415,93 @@ class ReportGenerator {
 // Main action logic
 async function run() {
   try {
+    core.info('[Action] Starting OSS Dependency Analysis...');
     const sbomPath = core.getInput('sbom-path');
+    core.info(`[Action] SBOM Path: ${sbomPath}`);
     const token = core.getInput('token');
     const dependencyThreshold = core.getInput('dependency-threshold') || String(CONFIG.DEFAULT_DEPENDENCY_THRESHOLD);
+    core.info(`[Action] Dependency Threshold: ${dependencyThreshold}`);
     const createIssue = core.getInput('create-issue') === 'true';
+    core.info(`[Action] Create Issue: ${createIssue}`);
     const commentPR = core.getInput('comment-pr') === 'true';
+    core.info(`[Action] Comment PR: ${commentPR}`);
 
-    core.info(`Starting OSS Dependency Analysis...`);
-    core.info(`SBOM Path: ${sbomPath}`);
-    core.info(`Dependency Threshold: ${dependencyThreshold}`);
+    let components;
+    try {
+      components = await SBOMParser.parse(sbomPath);
+      core.info(`[Action] Found ${components.length} components in SBOM`);
+    } catch (err) {
+      core.error(`[Action] SBOM parsing failed: ${err.message}`);
+      throw err;
+    }
 
-    const components = await SBOMParser.parse(sbomPath);
-    core.info(`Found ${components.length} components in SBOM`);
+    let analysis;
+    try {
+      const analyzer = new DependencyAnalyzer(dependencyThreshold);
+      analysis = await analyzer.analyzeComponents(components);
+      core.info(`[Action] Dependency analysis complete. Total packages: ${analysis.packages.length}`);
+    } catch (err) {
+      core.error(`[Action] Dependency analysis failed: ${err.message}`);
+      throw err;
+    }
 
-    const analyzer = new DependencyAnalyzer(dependencyThreshold);
-    const analysis = await analyzer.analyzeComponents(components);
+    let report;
+    try {
+      report = await ReportGenerator.generateMarkdown(analysis, parseInt(dependencyThreshold));
+      core.info('[Action] Report markdown generated');
+    } catch (err) {
+      core.error(`[Action] Report generation failed: ${err.message}`);
+      throw err;
+    }
 
-    const report = await ReportGenerator.generateMarkdown(analysis, parseInt(dependencyThreshold));
     const reportPath = path.join(process.cwd(), CONFIG.REPORT_FILENAME);
-    await ReportGenerator.saveReport(report, reportPath);
+    try {
+      await ReportGenerator.saveReport(report, reportPath);
+      core.info(`[Action] Report saved to ${reportPath}`);
+    } catch (err) {
+      core.error(`[Action] Failed to save report: ${err.message}`);
+      throw err;
+    }
 
     core.setOutput('with-wishlist-count', analysis.with_wishlist_count);
     core.setOutput('without-backing-count', analysis.packages.filter(p => !p.big_tech_backing).length);
     core.setOutput('report-path', reportPath);
 
     if (commentPR && github.context.payload.pull_request) {
-      const octokit = github.getOctokit(token);
-      await octokit.rest.issues.createComment({
-        ...github.context.repo,
-        issue_number: github.context.payload.pull_request.number,
-        body: report
-      });
-      core.info('Posted analysis as PR comment');
+      try {
+        const octokit = github.getOctokit(token);
+        await octokit.rest.issues.createComment({
+          ...github.context.repo,
+          issue_number: github.context.payload.pull_request.number,
+          body: report
+        });
+        core.info('[Action] Posted analysis as PR comment');
+      } catch (err) {
+        core.error(`[Action] Failed to post PR comment: ${err.message}`);
+      }
     }
 
     const withoutBacking = analysis.packages.filter(p => !p.big_tech_backing).length;
     if (createIssue && withoutBacking > 0) {
-      const octokit = github.getOctokit(token);
-      await octokit.rest.issues.create({
-        ...github.context.repo,
-        title: `${CONFIG.ISSUE_TITLE_PREFIX} ${withoutBacking} Dependencies with Wishlists Need Support`,
-        body: report,
-        labels: CONFIG.ISSUE_LABELS
-      });
-      core.info('Created issue for dependencies with wishlists needing backing');
+      try {
+        const octokit = github.getOctokit(token);
+        await octokit.rest.issues.create({
+          ...github.context.repo,
+          title: `${CONFIG.ISSUE_TITLE_PREFIX} ${withoutBacking} Dependencies with Wishlists Need Support`,
+          body: report,
+          labels: CONFIG.ISSUE_LABELS
+        });
+        core.info('[Action] Created issue for dependencies with wishlists needing backing');
+      } catch (err) {
+        core.error(`[Action] Failed to create issue: ${err.message}`);
+      }
     }
 
-    core.info('✅ Analysis complete!');
-
+    core.info('[Action] ✅ Analysis complete!');
   } catch (error) {
+    core.error(`[Action] Failed: ${error.message}`);
     core.setFailed(error.message);
+}
   }
 }
 
