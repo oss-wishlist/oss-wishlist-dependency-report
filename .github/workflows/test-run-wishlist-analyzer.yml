@@ -1,0 +1,76 @@
+name: Run OSS Wishlist Analyzer (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      generate-sbom:
+        description: "Generate SBOM before analysis"
+        type: boolean
+        default: true
+      sbom-format:
+        description: "SBOM format to generate (if generating)"
+        type: choice
+        options:
+          - spdx-json
+          - cyclonedx-json
+        default: spdx-json
+      sbom-path:
+        description: "Path to SBOM file to analyze"
+        type: string
+        default: sbom.json
+
+permissions:
+  contents: read
+
+jobs:
+  analyze-dependencies:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Optionally generate an SBOM if you don't already have one
+      - name: Generate SBOM
+        if: ${{ inputs.generate-sbom }}
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./
+          format: ${{ inputs.sbom-format }}
+          output-file: ${{ inputs.sbom-path }}
+
+      - name: Run OSS Wishlist Analyzer
+        id: analyze
+        uses: oss-wishlist/oss-wishlist-dependency-report@main
+        with:
+          sbom-path: ${{ inputs.sbom-path }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          comment-pr: 'false'
+          create-issue: 'false'
+
+      - name: Add report to job summary
+        if: always()
+        run: |
+          {
+            echo "## OSS Wishlist Analysis";
+            echo;
+            echo "- Dependencies with wishlists: ${{ steps.analyze.outputs.with-wishlist-count }}";
+            echo "- Without Big Tech backing: ${{ steps.analyze.outputs.without-backing-count }}";
+            echo "- Report file: oss-wishlist-report.md (also attached as artifact 'oss-analysis-report')";
+            echo;
+            echo "<details><summary>Report preview (first 400 lines)</summary>";
+            echo;
+            echo '```markdown';
+            head -n 400 oss-wishlist-report.md || true;
+            echo '```';
+            echo;
+            echo "</details>";
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload analysis report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oss-analysis-report
+          path: oss-wishlist-report.md
+          retention-days: 30
