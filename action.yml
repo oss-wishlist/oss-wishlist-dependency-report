@@ -30,12 +30,46 @@ inputs:
     required: false
     default: 'true'
 
+  # Optional filtering by OpenSSF Scorecard
+  filter-scorecard:
+    description: 'Filter results by OpenSSF Scorecard overall score range'
+    required: false
+    default: 'false'
+  scorecard-min:
+    description: 'Minimum OpenSSF Scorecard score (0.0 - 10.0)'
+    required: false
+    default: '7.0'
+  scorecard-max:
+    description: 'Maximum OpenSSF Scorecard score (0.0 - 10.0)'
+    required: false
+    default: '10.0'
+
+  # Optional filtering by OpenSSF Criticality Score (if available)
+  filter-criticality:
+    description: 'Filter results by OpenSSF Criticality score range (requires metric availability)'
+    required: false
+    default: 'false'
+  criticality-min:
+    description: 'Minimum OpenSSF Criticality score (0.0 - 1.0)'
+    required: false
+    default: '0.70'
+  criticality-max:
+    description: 'Maximum OpenSSF Criticality score (0.0 - 1.0)'
+    required: false
+    default: '1.0'
+
+  # Include Big Tech–backed dependencies
+  include-bigtech-backed:
+    description: 'Include dependencies with Big Tech backing (opt-in). If false, only show packages without Big Tech backing.'
+    required: false
+    default: 'false'
+
 outputs:
   with-wishlist-count:
     description: 'Number of dependencies with wishlists (currently GitHub Sponsors)'
   
   without-backing-count:
-    description: 'Number of dependencies with wishlists but without Big Tech backing'
+    description: 'Number of dependencies with wishlists but without maintainers using Big Tech email aliases'
   
   report-path:
     description: 'Path to detailed analysis report'
