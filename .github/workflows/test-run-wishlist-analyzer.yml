@@ -46,6 +46,14 @@ on:
         description: "Max Criticality score (0.0 - 1.0)"
         type: string
         default: "1.0"
+      use-wishlists-json:
+        description: "Use a local wishlists.json file as the primary wishlist filter (overrides funding signals)"
+        type: boolean
+        default: false
+      wishlists-path:
+        description: "Path to local wishlists JSON file"
+        type: string
+        default: "wishlists.json"
 
 permissions:
   contents: read
@@ -106,6 +114,8 @@ jobs:
           filter-criticality: ${{ inputs.filter-criticality }}
           criticality-min: ${{ inputs.criticality-min }}
           criticality-max: ${{ inputs.criticality-max }}
+          use-wishlists-json: ${{ inputs.use-wishlists-json }}
+          wishlists-path: ${{ inputs.wishlists-path }}
 
       - name: Add report to job summary
         if: always()

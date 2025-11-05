@@ -66,10 +66,50 @@ This provides **sustainability-focused risk assessment** that identifies project
 - filter-criticality: Filter by OpenSSF Criticality score (if available in metadata; default: false)
 	- criticality-min: Minimum Criticality score (0.0 – 1.0)
 	- criticality-max: Maximum Criticality score (0.0 – 1.0)
+- use-wishlists-json: Enable a local wishlists JSON file as the primary wishlist source (default: false)
+- wishlists-path: Path to local wishlists JSON file (default: wishlists.json)
 
 Notes:
 - Scorecard scores are retrieved via the public OpenSSF Scorecard API for GitHub-hosted repositories when filtering is enabled.
 - Criticality score filtering is best-effort and only applied when the metric is available in ecosyste.ms metadata.
+
+### Using a local wishlists JSON file (temporary stand-in for ecosyste.ms field)
+
+Until ecosyste.ms exposes an official `oss-wishlist` field, you can provide a JSON file that explicitly marks packages as having wishlists. This allows testing with **actual projects** and **actual wishes** before the field is available.
+
+**Recommended location:** `wishlists.json` in your repository root.
+
+**To enable:** Set `use-wishlists-json: true` in your workflow (or use the manual workflow checkbox). If enabled, the action will load the file and treat matching packages as having wishlists, regardless of funding signals.
+
+**Supported JSON formats** (choose one):
+
+1) Array of entries
+
+```json
+[
+	{ "purl": "pkg:npm/%40types/node@20.10.0", "has_wishlist": true, "links": ["https://github.com/sponsors/foo"] },
+	{ "type": "pypi", "name": "requests", "has_wishlist": true }
+]
+```
+
+2) Object map (keys are purl or `type:name`), values may be `true` or an object
+
+```json
+{
+	"pkg:npm/lodash@4.17.21": true,
+	"pypi:requests": { "has_wishlist": true, "links": ["https://opencollective.com/requests"] }
+}
+```
+
+**Behavior:**
+- If a local entry is found for a component by exact PURL match, it takes precedence.
+- Otherwise, a `type:name` (e.g., `npm:lodash`) match is attempted (version-agnostic).
+- `has_wishlist` defaults to `true` when an entry exists.
+- Any `links` provided are merged into the Funding section of the report.
+- The report will note "Wishlist source: mock JSON file" for transparency.
+- When enabled, this overrides the default funding-based proxy for matched packages.
+
+**Legacy input names:** If you previously used `mock-wishlists-path` or `wishlist-map-path`, those are still supported as fallbacks when `use-wishlists-json` is not enabled.
 
 ## SBOM generation details
 

@@ -31929,6 +31929,130 @@ const CONFIG = {
   }
 };
 
+// Mock wishlists loader (temporary until ecosyste.ms exposes official field)
+class MockWishlists {
+  constructor() {
+    this.byPurl = new Map();           // key: purl (lowercased)
+    this.byTypeName = new Map();       // key: `${type}:${name}` (lowercased)
+    this.byRepoUrl = new Map();        // key: normalized repo URL (lowercased, no .git suffix)
+  }
+
+  static normalizeRepoUrl(url) {
+    if (!url) return '';
+    try {
+      let normalized = url.toLowerCase().trim();
+      // Remove common prefixes
+      normalized = normalized.replace(/^git\+/, '');
+      normalized = normalized.replace(/\.git$/, '');
+      // Parse URL to normalize
+      const u = new URL(normalized);
+      // Return canonical form: protocol://host/path (no trailing slash, no .git)
+      return `${u.protocol}//${u.host}${u.pathname.replace(/\/$/, '')}`;
+    } catch {
+      return url.toLowerCase().trim();
+    }
+  }
+
+  static async load(filePath) {
+    const instance = new MockWishlists();
+    try {
+      const raw = await fs.readFile(filePath, 'utf8');
+      const json = JSON.parse(raw);
+
+      const addEntry = (entry, hintKey) => {
+        if (!entry || typeof entry !== 'object') return;
+        const purl = (entry.purl || '').toLowerCase();
+        const hasWishlist = typeof entry.has_wishlist === 'boolean' ? entry.has_wishlist : true;
+        const links = Array.isArray(entry.links) ? entry.links.filter(Boolean) :
+                      Array.isArray(entry.funding_links) ? entry.funding_links.filter(Boolean) :
+                      Array.isArray(entry.wishlist?.links) ? entry.wishlist.links.filter(Boolean) :
+                      entry.wishlistUrl ? [entry.wishlistUrl] : [];
+        const type = (entry.type || entry.ecosystem || '').toLowerCase();
+        const name = (entry.name || entry.projectName || '').toLowerCase();
+        const repoUrl = entry.repositoryUrl || entry.repository_url || entry.repo_url || '';
+        const details = entry.wishlist && typeof entry.wishlist === 'object' ? entry.wishlist : 
+                       entry.projectName ? { projectName: entry.projectName } : undefined;
+        const value = { hasWishlist, links, details, __source: 'mock-json' };
+
+        if (purl && purl.startsWith('pkg:')) {
+          instance.byPurl.set(purl, value);
+        }
+        if (type && name) {
+          instance.byTypeName.set(`${type}:${name}`, value);
+        }
+        if (repoUrl) {
+          const normalized = MockWishlists.normalizeRepoUrl(repoUrl);
+          if (normalized) {
+            instance.byRepoUrl.set(normalized, value);
+          }
+        }
+
+        // Support map-style key hint when entry came from a key/value
+        if (!purl && hintKey && hintKey.startsWith('pkg:')) {
+          instance.byPurl.set(hintKey.toLowerCase(), value);
+        } else if (!type && !name && hintKey && hintKey.includes(':') && !hintKey.startsWith('pkg:')) {
+          instance.byTypeName.set(hintKey.toLowerCase(), value);
+        }
+      };
+
+      if (Array.isArray(json)) {
+        for (const entry of json) addEntry(entry);
+      } else if (json && typeof json === 'object') {
+        const entries = Array.isArray(json.entries) ? json.entries : null;
+        if (entries) {
+          for (const entry of entries) addEntry(entry);
+        } else {
+          // Treat as map: key -> value
+          for (const [key, value] of Object.entries(json)) {
+            if (value && typeof value === 'object') {
+              addEntry(value, key);
+            } else if (value === true) {
+              addEntry({ purl: key, has_wishlist: true }, key);
+            }
+          }
+        }
+      }
+
+      core.info(`[MockWishlists] Loaded ${instance.byRepoUrl.size} repository URLs, ${instance.byPurl.size} PURLs, ${instance.byTypeName.size} type:name entries`);
+      return instance;
+    } catch (e) {
+      core.warning(`[MockWishlists] Failed to load from ${filePath}: ${e.message}`);
+      return null;
+    }
+  }
+
+  lookup(purl, parsed, repositoryUrl) {
+    if (!purl && !parsed && !repositoryUrl) return null;
+    
+    // Try exact PURL match first
+    const purlKey = (purl || '').toLowerCase();
+    if (purlKey && this.byPurl.has(purlKey)) {
+      core.info(`[MockWishlists] ✓ Matched by PURL: ${purl}`);
+      return this.byPurl.get(purlKey);
+    }
+    
+    // Try type:name match
+    if (parsed && parsed.type && parsed.packageName) {
+      const typeName = `${parsed.type.toLowerCase()}:${parsed.packageName.toLowerCase()}`;
+      if (this.byTypeName.has(typeName)) {
+        core.info(`[MockWishlists] ✓ Matched by type:name: ${typeName}`);
+        return this.byTypeName.get(typeName);
+      }
+    }
+    
+    // Try repository URL match
+    if (repositoryUrl) {
+      const normalized = MockWishlists.normalizeRepoUrl(repositoryUrl);
+      if (normalized && this.byRepoUrl.has(normalized)) {
+        core.info(`[MockWishlists] ✓ Matched by repository URL: ${repositoryUrl} → ${normalized}`);
+        return this.byRepoUrl.get(normalized);
+      }
+    }
+    
+    return null;
+  }
+}
+
 // Ecosyste.ms API client
 class EcosystemsClient {
   constructor(options = {}) {
@@ -31939,7 +32063,8 @@ class EcosystemsClient {
     this.registryMap = CONFIG.REGISTRY_MAP;
     this.options = {
       needScorecard: Boolean(options.needScorecard),
-      needCriticality: Boolean(options.needCriticality)
+      needCriticality: Boolean(options.needCriticality),
+      mockWishlists: options.mockWishlists || null
     };
   }
 
@@ -32077,30 +32202,42 @@ class EcosystemsClient {
     // - owner/org sponsors listing (repoMeta.owner_record.metadata.has_sponsors_listing)
     // - owner-level funding links (repoMeta.owner_record.funding_links)
     // - repository FUNDING file presence (repoMeta.metadata.files.funding)
-    // - repository-level funding links (repoMeta.funding_links)
-    const pkgFundingLinks = Array.isArray(data.funding_links) ? data.funding_links : [];
+  // - repository-level funding links (repoMeta.funding_links)
+  let fundingLinks = Array.isArray(data.funding_links) ? data.funding_links : [];
     const ownerHasSponsors = Boolean(repoMeta.owner_record?.metadata?.has_sponsors_listing);
     const ownerFundingLinks = Array.isArray(repoMeta.owner_record?.funding_links)
       ? repoMeta.owner_record.funding_links
       : [];
     const repoFundingFile = Boolean(repoMeta.metadata?.files?.funding);
-    const repoFundingLinks = Array.isArray(repoMeta.funding_links) ? repoMeta.funding_links : [];
+  const repoFundingLinks = Array.isArray(repoMeta.funding_links) ? repoMeta.funding_links : [];
     // Some registries might (in future or undocumented) expose maintainer funding_links
     const maintainerFundingLinks = Array.isArray(data.maintainers)
       ? data.maintainers.flatMap(m => Array.isArray(m.funding_links) ? m.funding_links : [])
       : [];
     // Merge and dedupe funding links
-    const fundingLinks = Array.from(new Set([
-      ...pkgFundingLinks,
+    fundingLinks = Array.from(new Set([
+      ...fundingLinks,
       ...ownerFundingLinks,
       ...repoFundingLinks,
       ...maintainerFundingLinks
     ].filter(Boolean)));
-    const has_github_sponsors = Boolean(
+    let has_github_sponsors = Boolean(
       fundingLinks.length > 0 ||
       ownerHasSponsors ||
       repoFundingFile
     );
+    // Mock wishlists override (treat as oss-wishlist presence)
+    const parsed = this.parsePackageUrl(purl);
+    const repositoryUrl = data.repository_url;
+    const mock = this.options.mockWishlists ? this.options.mockWishlists.lookup(purl, parsed, repositoryUrl) : null;
+    if (mock) {
+      has_github_sponsors = Boolean(mock.hasWishlist);
+      if (Array.isArray(mock.links) && mock.links.length) {
+        // Merge and dedupe links
+        const merged = new Set([...(fundingLinks || []), ...mock.links]);
+        fundingLinks = Array.from(merged);
+      }
+    }
     
     const info = {
       name: data.name,
@@ -32115,6 +32252,11 @@ class EcosystemsClient {
       scorecard_score: null,
       criticality_score: null
     };
+
+    if (mock) {
+      info.wishlist_source = 'mock-json';
+      if (mock.details) info.wishlist_details = mock.details;
+    }
 
     // Fetch optional metrics
     if (this.options.needScorecard) {
@@ -32236,7 +32378,8 @@ class DependencyAnalyzer {
     };
     this.ecosystems = new EcosystemsClient({
       needScorecard: this.options.filterScorecard,
-      needCriticality: this.options.filterCriticality
+      needCriticality: this.options.filterCriticality,
+      mockWishlists: options.mockWishlists || null
     });
   }
 
@@ -32338,12 +32481,13 @@ class ReportGenerator {
   static async generateMarkdown(analysis, threshold, filters = null) {
       core.info('[ReportGenerator] Starting markdown report generation');
       let report = `${CONFIG.REPORT_TITLE}\n\n`;
-      report += `> **Note**: This report shows dependencies with **wishlists** (currently using GitHub Sponsors as a proxy until \`oss-wishlist\` field is available in ecosyste.ms).\n\n`;
+      report += `> **Note**: This report shows dependencies with **wishlists** (currently using GitHub Sponsors and other funding signals until the \`oss-wishlist\` field is available in ecosyste.ms).\n\n`;
       if (filters) {
         const bigTechFlag = filters.includeBigTechBacked ? 'on' : 'off';
         const scorecardFlag = filters.filterScorecard ? `on [${filters.scorecardMin ?? '0.0'}, ${filters.scorecardMax ?? '10.0'}]` : 'off';
         const criticalityFlag = filters.filterCriticality ? `on [${filters.criticalityMin ?? '0.0'}, ${filters.criticalityMax ?? '1.0'}]` : 'off';
-        report += `> Active filters: Include maintainer Big Tech email alias=${bigTechFlag}; OpenSSF Scorecard=${scorecardFlag}; OpenSSF Criticality=${criticalityFlag}\n\n`;
+        const wishlistSourceFlag = filters.useWishlistsJSON ? 'local wishlists JSON override: on' : 'local wishlists JSON override: off';
+        report += `> Active filters: Include maintainer Big Tech email alias=${bigTechFlag}; OpenSSF Scorecard=${scorecardFlag}; OpenSSF Criticality=${criticalityFlag}; ${wishlistSourceFlag}\n\n`;
       }
       report += `${CONFIG.REPORT_SUMMARY_TITLE}\n\n`;
       report += `- **Total Dependencies Scanned**: ${analysis.total_analyzed}\n`;
@@ -32386,6 +32530,9 @@ class ReportGenerator {
               report += `  - ${link}\n`;
             }
           }
+          if (pkg.wishlist_source === 'mock-json') {
+            report += `- **Wishlist source**: mock JSON file\n`;
+          }
           report += `\n`;
         }
       }
@@ -32412,6 +32559,9 @@ class ReportGenerator {
             for (const link of pkg.funding_links) {
               report += `  - ${link}\n`;
             }
+          }
+          if (pkg.wishlist_source === 'mock-json') {
+            report += `- **Wishlist source**: mock JSON file\n`;
           }
           report += `\n`;
         }
@@ -32449,9 +32599,45 @@ async function run() {
     const filterCriticality = core.getInput('filter-criticality') === 'true';
     const criticalityMin = core.getInput('criticality-min');
     const criticalityMax = core.getInput('criticality-max');
+    // Wishlist JSON controls (new) + legacy fallbacks
+    const useWishlistsJSON = core.getInput('use-wishlists-json') === 'true';
+    const wishlistsPath = core.getInput('wishlists-path') || 'wishlists.json';
+    const mockWishlistsPathInput = core.getInput('mock-wishlists-path') || '';
+    const wishlistMapPathLegacy = core.getInput('wishlist-map-path') || '';
     core.info(`[Action] include-bigtech-backed: ${includeBigTechBacked}`);
     core.info(`[Action] filter-scorecard: ${filterScorecard} [${scorecardMin}, ${scorecardMax}]`);
     core.info(`[Action] filter-criticality: ${filterCriticality} [${criticalityMin}, ${criticalityMax}]`);
+    core.info(`[Action] use-wishlists-json: ${useWishlistsJSON}`);
+    core.info(`[Action] wishlists-path: ${wishlistsPath}`);
+    core.info(`[Action] mock-wishlists-path (legacy): ${mockWishlistsPathInput || '(none)'}`);
+    core.info(`[Action] wishlist-map-path (legacy): ${wishlistMapPathLegacy || '(none)'}`);
+
+    // Load mock wishlists file if provided
+    let mockWishlists = null;
+    // Load wishlists JSON if selected or legacy path provided
+    let selectedWishlistPath = '';
+    if (useWishlistsJSON) {
+      selectedWishlistPath = wishlistsPath;
+    } else if (mockWishlistsPathInput) {
+      selectedWishlistPath = mockWishlistsPathInput;
+    } else if (wishlistMapPathLegacy) {
+      selectedWishlistPath = wishlistMapPathLegacy;
+    }
+    if (selectedWishlistPath) {
+      try {
+        const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
+        const resolvedMockPath = path.isAbsolute(selectedWishlistPath)
+          ? selectedWishlistPath
+          : path.join(workspace, selectedWishlistPath);
+        core.info(`[Action] Loading wishlists JSON from ${resolvedMockPath}`);
+        mockWishlists = await MockWishlists.load(resolvedMockPath);
+        if (!mockWishlists) {
+          core.warning('[Action] Wishlists JSON file could not be loaded; proceeding without it.');
+        }
+      } catch (e) {
+        core.warning(`[Action] Failed to initialize wishlists JSON: ${e.message}`);
+      }
+    }
 
     let components;
     try {
@@ -32471,7 +32657,8 @@ async function run() {
         scorecardMax,
         filterCriticality,
         criticalityMin,
-        criticalityMax
+        criticalityMax,
+        mockWishlists
       });
       analysis = await analyzer.analyzeComponents(components);
       core.info(`[Action] Dependency analysis complete. Total packages: ${analysis.packages.length}`);
@@ -32489,7 +32676,8 @@ async function run() {
         scorecardMax,
         filterCriticality,
         criticalityMin,
-        criticalityMax
+        criticalityMax,
+        useWishlistsJSON: Boolean(mockWishlists)
       });
       core.info('[Action] Report markdown generated');
     } catch (err) {

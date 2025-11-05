@@ -30,6 +30,22 @@ inputs:
     required: false
     default: 'true'
 
+  # Local wishlists JSON (stand-in for ecosyste.ms field)
+  use-wishlists-json:
+    description: 'Use a local wishlists JSON file as the primary wishlist filter (overrides funding signals)'
+    required: false
+    default: 'false'
+  wishlists-path:
+    description: 'Path to local wishlists JSON file'
+    required: false
+    default: 'wishlists.json'
+
+  # Optional: mock wishlist mapping file
+  wishlist-map-path:
+    description: 'Path to a JSON file that lists packages with wishlists (temporary stand-in until ecosyste.ms exposes an official field)'
+    required: false
+    default: ''
+
   # Optional filtering by OpenSSF Scorecard
   filter-scorecard:
     description: 'Filter results by OpenSSF Scorecard overall score range'
@@ -63,6 +79,12 @@ inputs:
     description: 'Include dependencies with Big Tech backing (opt-in). If false, only show packages without Big Tech backing.'
     required: false
     default: 'false'
+
+  # Optional mock wishlists JSON (temporary until ecosyste.ms exposes official field)
+  mock-wishlists-path:
+    description: 'Path to a JSON file that mimics ecosyste.ms wishlists. Relative to workspace. If provided, entries in this file will be treated as having wishlists.'
+    required: false
+    default: ''
 
 outputs:
   with-wishlist-count:
