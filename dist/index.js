@@ -31972,7 +31972,7 @@ class MockWishlists {
         const repoUrl = entry.repositoryUrl || entry.repository_url || entry.repo_url || '';
         const details = entry.wishlist && typeof entry.wishlist === 'object' ? entry.wishlist : 
                        entry.projectName ? { projectName: entry.projectName } : undefined;
-        const value = { hasWishlist, links, details, __source: 'mock-json' };
+        const value = { hasWishlist, links, details, repositoryUrl: repoUrl || undefined, __source: 'mock-json' };
 
         if (purl && purl.startsWith('pkg:')) {
           instance.byPurl.set(purl, value);
@@ -32064,7 +32064,8 @@ class EcosystemsClient {
     this.options = {
       needScorecard: Boolean(options.needScorecard),
       needCriticality: Boolean(options.needCriticality),
-      mockWishlists: options.mockWishlists || null
+      mockWishlists: options.mockWishlists || null,
+      offline: Boolean(options.offline) // when true, skip ecosyste.ms and rely solely on mock wishlists JSON
     };
   }
 
@@ -32192,6 +32193,42 @@ class EcosystemsClient {
   }
 
   async getPackageInfo(purl) {
+    // Offline mode: do not call ecosyste.ms; derive minimal info from mock wishlists
+    if (this.options.offline) {
+      // Try normal parse first (for known ecosystems)
+      let parsed = this.parsePackageUrl(purl);
+      // Derive a repository URL for GitHub purls without relying on ecosyste.ms
+      let derivedRepoUrl = null;
+      if (!parsed) {
+        const m = /^pkg:github\/([^\/]+)\/([^@#]+)(?:[@#].*)?$/i.exec(purl);
+        if (m) {
+          const owner = m[1];
+          const repo = m[2];
+          derivedRepoUrl = `https://github.com/${owner}/${repo}`;
+          // Provide a minimal parsed representation for type:name matching
+          parsed = { type: 'github', registry: 'github.com', packageName: `${owner}/${repo}` };
+        }
+      }
+      const mock = this.options.mockWishlists ? this.options.mockWishlists.lookup(purl, parsed, derivedRepoUrl) : null;
+      if (!mock || !mock.hasWishlist) {
+        return null; // treat as no wishlist
+      }
+      const info = {
+        name: (parsed && parsed.packageName) || purl,
+        dependents_count: 0,
+        stars: 0,
+        age_months: 0,
+        last_update_months: 0,
+        repository_url: mock.repositoryUrl || derivedRepoUrl || null,
+        big_tech_backing: false,
+        has_wishlist: true,
+        funding_links: Array.isArray(mock.links) ? mock.links : [],
+        scorecard_score: null,
+        criticality_score: null,
+        wishlist_source: 'mock-json'
+      };
+      return info;
+    }
     const data = await this.getPackageData(purl);
     if (!data) return null;
 
@@ -32379,7 +32416,8 @@ class DependencyAnalyzer {
     this.ecosystems = new EcosystemsClient({
       needScorecard: this.options.filterScorecard,
       needCriticality: this.options.filterCriticality,
-      mockWishlists: options.mockWishlists || null
+      mockWishlists: options.mockWishlists || null,
+      offline: Boolean(options.useWishlistsOnly)
     });
   }
 
@@ -32593,10 +32631,10 @@ async function run() {
     core.info(`[Action] Comment PR: ${commentPR}`);
     // New optional filters
     const includeBigTechBacked = core.getInput('include-bigtech-backed') === 'true';
-    const filterScorecard = core.getInput('filter-scorecard') === 'true';
+  let filterScorecard = core.getInput('filter-scorecard') === 'true';
     const scorecardMin = core.getInput('scorecard-min');
     const scorecardMax = core.getInput('scorecard-max');
-    const filterCriticality = core.getInput('filter-criticality') === 'true';
+  let filterCriticality = core.getInput('filter-criticality') === 'true';
     const criticalityMin = core.getInput('criticality-min');
     const criticalityMax = core.getInput('criticality-max');
     // Wishlist JSON controls (new) + legacy fallbacks
@@ -32611,6 +32649,17 @@ async function run() {
     core.info(`[Action] wishlists-path: ${wishlistsPath}`);
     core.info(`[Action] mock-wishlists-path (legacy): ${mockWishlistsPathInput || '(none)'}`);
     core.info(`[Action] wishlist-map-path (legacy): ${wishlistMapPathLegacy || '(none)'}`);
+
+    // In wishlists-only mode, ignore filters that require remote repo metadata
+    let useWishlistsOnly = false;
+    if (useWishlistsJSON) {
+      useWishlistsOnly = true;
+      if (filterScorecard || filterCriticality) {
+        core.warning('[Action] use-wishlists-json=true: Ignoring Scorecard/Criticality filters in wishlists-only mode');
+      }
+      filterScorecard = false;
+      filterCriticality = false;
+    }
 
     // Load mock wishlists file if provided
     let mockWishlists = null;
@@ -32658,7 +32707,8 @@ async function run() {
         filterCriticality,
         criticalityMin,
         criticalityMax,
-        mockWishlists
+        mockWishlists,
+        useWishlistsOnly
       });
       analysis = await analyzer.analyzeComponents(components);
       core.info(`[Action] Dependency analysis complete. Total packages: ${analysis.packages.length}`);
@@ -32677,7 +32727,7 @@ async function run() {
         filterCriticality,
         criticalityMin,
         criticalityMax,
-        useWishlistsJSON: Boolean(mockWishlists)
+        useWishlistsJSON: useWishlistsOnly
       });
       core.info('[Action] Report markdown generated');
     } catch (err) {
